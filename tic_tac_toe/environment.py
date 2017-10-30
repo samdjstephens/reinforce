@@ -1,13 +1,21 @@
 import random
+import itertools
+
 from collections import defaultdict
-from typing import NamedTuple, Tuple, Any, Dict
+from typing import NamedTuple, Tuple, Dict
 from functools import partial
 
 import numpy as np
 
 
 def any_abs_sum_is_3(*vals):
-    return any((abs(val) == 3).any() for val in vals)
+    vals = [a.tolist() if isinstance(a, np.ndarray) else [a] for a in vals]
+    return any(abs(val) == 3 for val in itertools.chain(*vals))
+
+def winner(*vals):
+    vals = [a.tolist() if isinstance(a, np.ndarray) else [a] for a in vals]
+    max_ = max(itertools.chain(*vals), key=lambda val: abs(val))
+    return max_ // 3 if abs(max_) == 3 else None
 
 
 Position = NamedTuple('Position', [('x', int), ('y', int)])
@@ -24,12 +32,22 @@ class TicTacToe(object):
         return np.zeros((3, 3), dtype=np.int8)
 
     def episode_complete(self):
-        return any_abs_sum_is_3(
+        has_winner = any_abs_sum_is_3(
             self.board.sum(axis=0),
             self.board.sum(axis=1),
             self.board.diagonal().sum(),
             np.rot90(self.board).diagonal().sum()
-        ) or ((self.board != 0).all())
+        )
+        is_draw = (self.board != 0).all()
+        return has_winner or is_draw
+
+    def winner(self):
+        return winner(
+            self.board.sum(axis=0),
+            self.board.sum(axis=1),
+            self.board.diagonal().sum(),
+            np.rot90(self.board).diagonal().sum()
+        )
 
     def interact(self, action: TTTAction) -> int:
         reward = 0
@@ -42,12 +60,15 @@ class TicTacToe(object):
             reward = 1
         else:
             # Take opponents action
-            opp_action = self.opponent_agent.act(self.state_rep())
-            self.place(opp_action.marker, opp_action.position)
+            self.opponent_play()
             if self.episode_complete():
                 reward = -1
 
         return reward
+
+    def opponent_play(self):
+        opp_action = self.opponent_agent.act(self.state_rep())
+        self.place(opp_action.marker, opp_action.position)
 
     def state_rep(self):
         return self.board.copy()
@@ -90,8 +111,7 @@ class SarsaAgent(object):
         self._random = random.Random(random_seed)
 
     def act(self, state: np.ndarray) -> TTTAction:
-        y, x = self.choose_egreedy(state)
-        return TTTAction(self.marker, Position(x, y))
+        return self.choose_egreedy(state)
 
     def get_feedback(self,
                      state: np.ndarray,
@@ -113,7 +133,7 @@ class SarsaAgent(object):
         self.eligibility = new_eligibility
 
     def update_q_values(self, td_error: float) -> None:
-        new_qvals: Dict[Tuple, Dict[TTTAction, float]] = defaultdict(dict)
+        new_qvals: Dict[Tuple[int], Dict[TTTAction, float]] = defaultdict(dict)
         for statekey, action_value_lookup in self.q_values.items():
             for actionkey, actionvalue in action_value_lookup.items():
                 new_qvals[statekey][actionkey] = (
@@ -128,20 +148,22 @@ class SarsaAgent(object):
                             for y, x in np.argwhere(state == 0)]
         if self.should_explore():
             # TODO What if state is full? This will raise an exception
-            return self._random.choice(possible_actions)
+            choice = self._random.choice(possible_actions)
         else:
-            return max(possible_actions, key=partial(self.get_action_value,
-                                                     state))
+            self._random.shuffle(possible_actions)
+            choice = max(possible_actions, key=partial(self.get_action_value,
+                                                       state))
+        return choice
 
     def get_action_value(self, state: np.ndarray, action: TTTAction) -> int:
         hstate = self.hashable_state(state)
-        return self.q_values.get(hstate, {}).get(action, 0)
+        return self.q_values[hstate].get(action, 0)
 
-    def hashable_state(self, state: np.ndarray) -> Tuple[Tuple[int]]:
+    def hashable_state(self, state: np.ndarray) -> Tuple[int]:
         return tuple(state.flatten())
 
     def should_explore(self) -> bool:
-        return self._random.random() > self.epsilon
+        return self._random.random() < self.epsilon
 
 
 
@@ -149,11 +171,18 @@ def play_episodes(n=100):
     agent = SarsaAgent(1)
     opponent = SarsaAgent(-1)
     env = TicTacToe(opponent)
+    winners = []
     for _ in range(n):
-        play_episode(agent, env)
+        winner = play_episode(agent, env)
+        winners.append(winner)
+    return winners
 
 
 def play_episode(agent: SarsaAgent, env: TicTacToe):
+    if agent._random.random() < 0.5:
+        # Let the opponent start 50% of the time
+        env.opponent_play()
+
     state = env.state_rep()
     action = agent.act(state)
     for turn in range(1, 18):  # Should be done in 9
@@ -168,13 +197,16 @@ def play_episode(agent: SarsaAgent, env: TicTacToe):
             action = new_action
         else:
             break
-
-    print(f"Episode complete. {turn} turns taken.")
+    print(f"Episode complete. {turn} turns taken.", end=' ')
+    result = env.winner()
+    if result:
+        print(f"{env.repr_marker(result)} won!")
+    else:
+        print("It was a draw")
     print(env, end='\n\n\n\n')
     env.reset()
     agent.reset()
-
+    return result
 
 if __name__ == '__main__':
-    # TODO: Something broken - its not picking anything in the top row
     play_episodes(100)
