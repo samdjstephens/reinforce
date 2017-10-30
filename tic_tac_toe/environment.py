@@ -2,7 +2,7 @@ import random
 import itertools
 
 from collections import defaultdict
-from typing import NamedTuple, Tuple, Dict
+from typing import NamedTuple, Tuple, Dict, Callable
 from functools import partial
 
 import numpy as np
@@ -101,8 +101,11 @@ class SarsaAgent(object):
                  alpha: float=0.9,
                  lambda_: float=0.9,
                  random_seed: int=10) -> None:
+        # TODO: Check all parameters are sensible
         self.marker = marker
         self.eligibility: Dict[Tuple, float] = defaultdict(float)
+        # TODO: Analyse action values - pick out ones which are clearly 'good' because
+        # they are 1 away from winning
         self.q_values: Dict[Tuple, Dict[TTTAction, float]] = defaultdict(dict)  # {state1: {action1: value}, state2: {action2: value}}
         self.epsilon = epsilon
         self.gamma = gamma
@@ -119,20 +122,24 @@ class SarsaAgent(object):
                      reward: int,
                      new_state: np.ndarray,
                      new_action: TTTAction) -> None:
+        # TODO: Check td_error calc
         td_error = (reward
                     + self.gamma * self.get_action_value(new_state, new_action)
                     - self.get_action_value(state, action))
+        # TODO: supposed to update eligibility for last state?
         self.eligibility[(self.hashable_state(state), action)] += 1
         self.update_q_values(td_error)
         self.update_eligibility_traces()
 
     def update_eligibility_traces(self) -> None:
+        # TODO: Unittest
         new_eligibility: Dict[Tuple, float] = defaultdict(float)
         for eligibilitykey, eligibilityvalue in self.eligibility.items():
             new_eligibility[eligibilitykey] = self.gamma * self.lambda_ * eligibilityvalue
         self.eligibility = new_eligibility
 
     def update_q_values(self, td_error: float) -> None:
+        # TODO: Unittest
         new_qvals: Dict[Tuple[int], Dict[TTTAction, float]] = defaultdict(dict)
         for statekey, action_value_lookup in self.q_values.items():
             for actionkey, actionvalue in action_value_lookup.items():
@@ -144,15 +151,20 @@ class SarsaAgent(object):
         self.eligibility.clear()
 
     def choose_egreedy(self, state: np.ndarray) -> TTTAction:
+        # TODO: Unittest with known action values
         possible_actions = [TTTAction(self.marker, Position(x, y))
                             for y, x in np.argwhere(state == 0)]
         if self.should_explore():
-            # TODO What if state is full? This will raise an exception
             choice = self._random.choice(possible_actions)
         else:
             self._random.shuffle(possible_actions)
-            choice = max(possible_actions, key=partial(self.get_action_value,
-                                                       state))
+            choice = self.exploitative_action(possible_actions, state)
+        return choice
+
+    def exploitative_action(self, possible_actions, state):
+        # TODO: Unittest with known action values
+        choice = max(possible_actions, key=partial(self.get_action_value,
+                                                   state))
         return choice
 
     def get_action_value(self, state: np.ndarray, action: TTTAction) -> int:
@@ -166,47 +178,56 @@ class SarsaAgent(object):
         return self._random.random() < self.epsilon
 
 
-
-def play_episodes(n=100):
-    agent = SarsaAgent(1)
-    opponent = SarsaAgent(-1)
-    env = TicTacToe(opponent)
-    winners = []
-    for _ in range(n):
-        winner = play_episode(agent, env)
-        winners.append(winner)
-    return winners
+def noop_print(text, end='\n'):
+    pass
 
 
-def play_episode(agent: SarsaAgent, env: TicTacToe):
-    if agent._random.random() < 0.5:
-        # Let the opponent start 50% of the time
-        env.opponent_play()
+class TestBed(object):
+    def __init__(self, logger: Callable=noop_print):
+        self.winners = []
+        self.logger = logger
+        self.agent = SarsaAgent(1)
+        self.opponent = SarsaAgent(-1)
+        self.env = TicTacToe(self.opponent)
 
-    state = env.state_rep()
-    action = agent.act(state)
-    for turn in range(1, 18):  # Should be done in 9
-        reward = env.interact(action)
-        new_state = env.state_rep()
-        # print(f"######### Turn {turn} ###########\n")
-        # print(env)
-        if not env.episode_complete():
-            new_action = agent.act(new_state)
-            agent.get_feedback(state, action, reward, new_state, new_action)
-            state = new_state
-            action = new_action
+    def play_episodes(self, n=100):
+        for _ in range(n):
+            winner = self.play_episode()
+            self.winners.append(winner)
+
+
+    def play_episode(self):
+        if self.agent._random.random() < 0.5:
+            # Let the opponent start 50% of the time
+            self.env.opponent_play()
+
+        state = self.env.state_rep()
+        action = self.agent.act(state)
+
+        for turn in range(1, 18):  # Should be done in 9
+            reward = self.env.interact(action)
+            new_state = self.env.state_rep()
+            # print(f"######### Turn {turn} ###########\n")
+            # print(self.env)
+            if not self.env.episode_complete():
+                new_action = self.agent.act(new_state)
+                self.agent.get_feedback(state, action, reward, new_state, new_action)
+                state = new_state
+                action = new_action
+            else:
+                break
+        self.logger(f"Episode complete. {turn} turns taken.", end=' ')
+        result = self.env.winner()
+        if result:
+            self.logger(f"{self.env.repr_marker(result)} won!")
         else:
-            break
-    print(f"Episode complete. {turn} turns taken.", end=' ')
-    result = env.winner()
-    if result:
-        print(f"{env.repr_marker(result)} won!")
-    else:
-        print("It was a draw")
-    print(env, end='\n\n\n\n')
-    env.reset()
-    agent.reset()
-    return result
+            self.logger("It was a draw")
+        self.logger(self.env, end='\n\n\n\n')
+        self.env.reset()
+        self.agent.reset()
+        # TODO: Reset opponent? Shouldnt matter - but maybe should do anyway
+        return result
 
 if __name__ == '__main__':
-    play_episodes(100)
+    test_bed = TestBed(logger=print)
+    test_bed.play_episodes(100)
