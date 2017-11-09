@@ -1,17 +1,16 @@
-import random
-import itertools
-
 from collections import defaultdict
-from typing import NamedTuple, Tuple, Dict, Callable
 from functools import partial
+import itertools
+import random
+from typing import NamedTuple, Tuple, Dict, Callable
 
 import numpy as np
-
 
 
 def any_abs_sum_is_3(*vals):
     vals = [a.tolist() if isinstance(a, np.ndarray) else [a] for a in vals]
     return any(abs(val) == 3 for val in itertools.chain(*vals))
+
 
 def winner(*vals):
     vals = [a.tolist() if isinstance(a, np.ndarray) else [a] for a in vals]
@@ -34,7 +33,7 @@ class TicTacToe(object):
         return np.zeros((3, 3), dtype=np.int8)
 
     @staticmethod
-    def episode_complete(state):
+    def is_episode_complete(state):
         has_winner = any_abs_sum_is_3(
             state.sum(axis=0),
             state.sum(axis=1),
@@ -44,8 +43,12 @@ class TicTacToe(object):
         is_draw = (state != 0).all()
         return has_winner or is_draw
 
+    @property
+    def episode_complete(self):
+        return self.is_episode_complete(self.state_rep())
+
     @staticmethod
-    def winner(state):
+    def get_winner(state):
         return winner(
             state.sum(axis=0),
             state.sum(axis=1),
@@ -53,20 +56,29 @@ class TicTacToe(object):
             np.rot90(state).diagonal().sum()
         )
 
+    @property
+    def winner(self):
+        return self.get_winner(self.state_rep())
+
     def interact(self, action: TTTAction) -> int:
         reward = 0
-        if self.episode_complete(self.state_rep()):
+        if self.is_episode_complete(self.state_rep()):
             return reward
 
         # Take agents action
         self.place(action.marker, action.position)
-        if self.episode_complete(self.state_rep()):
+
+        if self.episode_complete and self.winner is not None:
             reward = 1
+        elif self.episode_complete:
+            reward = 0
         else:
             # Take opponents action
             self.opponent_play()
-            if self.episode_complete(self.state_rep()):
+            if self.episode_complete and self.winner is not None:
                 reward = -1
+            elif self.episode_complete:
+                reward = 0
 
         return reward
 
@@ -124,7 +136,7 @@ class SarsaAgent(object):
         self._random = random.Random(random_seed)
 
     def act(self, state: np.ndarray) -> TTTAction:
-        if TicTacToe.episode_complete(state):
+        if TicTacToe.is_episode_complete(state):
             return TTTAction(self.marker, Position(-1, -1))  # Sentinel
         action = self.choose_egreedy(state)
         hashable_state = self.hashable_state(state)
@@ -184,7 +196,7 @@ class SarsaAgent(object):
         return choice
 
     def get_action_value(self, state: np.ndarray, action: TTTAction) -> int:
-        if TicTacToe.episode_complete(state):
+        if TicTacToe.is_episode_complete(state):
             return 0
         hstate = self.hashable_state(state)
         return self.q_values[hstate].get(action, 0)
@@ -209,7 +221,10 @@ class TestBed(object):
         self.env = TicTacToe(self.opponent)
 
     def play_episodes(self, n=100):
-        for _ in range(n):
+        print('Episode: ')
+        for i in range(n):
+            if i % 100 == 0:
+                print(f'{i+1}', end=' ')
             winner = self.play_episode()
             self.winners.append(winner)
 
@@ -232,10 +247,10 @@ class TestBed(object):
             self.agent.get_feedback(state, action, reward, new_state, new_action)
             state = new_state
             action = new_action
-            if self.env.episode_complete(state):
+            if self.env.is_episode_complete(state):
                 break
         self.logger(f"Episode complete. {turn} turns taken.", end=' ')
-        result = self.env.winner(state)
+        result = self.env.get_winner(state)
         if result:
             self.logger(f"{self.env.repr_marker(result)} won!")
         else:
