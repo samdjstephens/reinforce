@@ -30,7 +30,7 @@ class Environment(object):
         return reward
 
     def opponent_play(self) -> None:
-        opp_action = self.opponent_agent.act(self.state_rep())
+        opp_action = self.opponent_agent.act(self.state_rep(), self.game.available_positions())
         self.game.place(opp_action.marker, opp_action.position)
 
     def state_rep(self) -> TTTState:

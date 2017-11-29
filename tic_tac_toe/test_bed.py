@@ -40,7 +40,7 @@ class TestBed(object):
             reward = self.env.interact(action)
             new_state = self.env.state_rep()
 
-            new_action = self.agent.act(new_state)
+            new_action = self.agent.act(new_state, self.game.available_positions())
             self.agent.get_feedback(state, action, reward, new_state, new_action)
             state = new_state
             action = new_action

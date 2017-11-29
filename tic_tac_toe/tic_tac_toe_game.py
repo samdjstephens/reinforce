@@ -48,6 +48,9 @@ class TicTacToeGame(object):
             np.rot90(self.board).diagonal().sum()
         )
 
+    def available_positions(self):
+        return [Position(x, y) for y, x in np.argwhere(self.board == 0)]
+
     def reset(self):
         self.board = self.init_board()
 
